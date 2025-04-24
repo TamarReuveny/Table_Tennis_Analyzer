@@ -1,0 +1,10 @@
+# Ignore virtual environment
+venv/
+
+# Ignore macOS metadata files
+.DS_Store
+
+# Ignore Python bytecode
+__pycache__/
+*.pyc
+
