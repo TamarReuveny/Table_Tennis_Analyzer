@@ -7,7 +7,7 @@ END_FRAME = 200  # Set to 0 to process the full video
 
 
 def analyze_table_tennis_video(input_path="input.mp4", output_path="output_with_detections.mp4", csv_output="player_positions.csv"):
-    model = YOLO("yolov8n-pose.pt")
+    model = YOLO("yolo11n-pose.pt")
     cap = cv2.VideoCapture(input_path)
 
     if not cap.isOpened():
