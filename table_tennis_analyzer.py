@@ -10,17 +10,19 @@ import matplotlib.colors as mcolors
 
 # --- Constants for Video Processing ---
 START_FRAME = 0
-END_FRAME = 800 # Or 0 for full video, or user-defined value
+END_FRAME = 800
 INPUT_VIDEO = 'input.mp4'
 OUTPUT_VIDEO = 'output_with_detections.mp4'
 OUTPUT_CSV = 'player_positions.csv'
-PLAYER_Y_THRESHOLD_FACTOR = 0.45 # Stricter threshold
+PLAYER_Y_THRESHOLD_FACTOR = 0.60 
 
 # --- Model Selection ---
-MODEL_NAME = 'yolo11n-pose.pt'
+MODEL_NAME = 'yolo11n-pose.pt' # Corrected model name
+
+# --- Constants for Heatmap ---
 VIDEO_PATH_FOR_HEATMAP = INPUT_VIDEO
 CSV_PATH_FOR_HEATMAP = OUTPUT_CSV
-OUTPUT_HEATMAP_PATH = "player_position_heatmap.png"
+OUTPUT_HEATMAP_PATH = "player_position_heatmap.png" 
 HEATMAP_BINS = 30
 HEATMAP_ALPHA = 0.7
 HEATMAP_CMAP = 'jet'
@@ -29,6 +31,20 @@ VMAX_PERCENTILE = 95
 
 # --- Heatmap Generation Function ---
 def create_heatmap(csv_path, video_path, output_image_path, bins=HEATMAP_BINS, alpha=HEATMAP_ALPHA, cmap_name=HEATMAP_CMAP, interpolation=INTERPOLATION, vmax_percentile=VMAX_PERCENTILE):
+    """
+    Generates a heatmap overlay on a video frame using player position data.
+    Uses transparent zeros and percentile-based color scaling.
+
+    Args:
+        csv_path (str): Path to the player_positions.csv file.
+        video_path (str): Path to the original video file for background.
+        output_image_path (str): Path to save the generated heatmap image.
+        bins (int): Number of bins for the 2D histogram.
+        alpha (float): Transparency level for the heatmap overlay.
+        cmap_name (str): Matplotlib colormap name for the heatmap.
+        interpolation (str): Interpolation method for imshow display.
+        vmax_percentile (float): Percentile of non-zero density to use for vmax.
+    """
     print(f"\n--- Heatmap Generation ---")
     print(f"CSV: {csv_path}, Video: {video_path}, Output: {output_image_path}")
     print(f"Params: bins={bins}, alpha={alpha}, cmap='{cmap_name}', interp='{interpolation}', vmax_pctl={vmax_percentile}")
@@ -77,7 +93,7 @@ def create_heatmap(csv_path, video_path, output_image_path, bins=HEATMAP_BINS, a
             bins=bins,
             range=[[0, frame_width], [0, frame_height]]
         )
-        heatmap_data = heatmap_data.T 
+        heatmap_data = heatmap_data.T # Transpose for imshow compatibility
         print(f"Histogram shape: {heatmap_data.shape}, Max value: {heatmap_data.max():.2f}")
         if heatmap_data.max() == 0:
             print("Warning: Histogram data is all zeros. Heatmap will be blank.")
@@ -118,7 +134,7 @@ def create_heatmap(csv_path, video_path, output_image_path, bins=HEATMAP_BINS, a
             alpha=alpha,                # Apply overall alpha
             extent=[xedges[0], xedges[-1], yedges[-1], yedges[0]], # Match histogram edges
             origin='upper',
-            interpolation=interpolation,
+            interpolation=interpolation,# Apply smoothing
             aspect='auto',
             vmin=0,                     # Map 0 to transparent color
             vmax=calculated_vmax        # Use percentile-based max
@@ -133,8 +149,8 @@ def create_heatmap(csv_path, video_path, output_image_path, bins=HEATMAP_BINS, a
     ax.set_title('Combined Player Position Heatmap')
     ax.set_xlabel('X Position')
     ax.set_ylabel('Y Position')
-    ax.set_xticks([])
-    ax.set_yticks([]) 
+    ax.set_xticks([]) # Hide ticks
+    ax.set_yticks([]) # Hide ticks
     plt.tight_layout()
 
     # --- 7. Save ---
@@ -146,17 +162,32 @@ def create_heatmap(csv_path, video_path, output_image_path, bins=HEATMAP_BINS, a
     plt.close(fig)
 
 
-# --- Main Processing Function ---
+# --- Main Processing Function (Improved Player/Umpire Filtering) ---
 def process_video(input_path, output_video_path, output_csv_path, start_frame, end_frame, model_name, y_threshold_factor):
+    """
+    Processes video using YOLO pose detection, saves annotated video and player position CSV
+    (filtering umpire based on detection count and Y-coordinate), and returns video dimensions.
+
+    Args:
+        input_path (str): Path to the input video file.
+        output_video_path (str): Path to save the output video file with detections.
+        output_csv_path (str): Path to save the filtered player positions CSV file.
+        start_frame (int): Frame number to start processing from.
+        end_frame (int): Frame number to end processing at (0 for full video).
+        model_name (str): Name of the YOLO model to use.
+        y_threshold_factor (float): Factor of frame height. Used as fallback filter.
+    """
     if not os.path.exists(input_path):
         print(f"Error: Input video file not found at '{input_path}'")
         return None
     print(f"Loading YOLO model: {model_name}...")
     try:
+        # Ensure the correct model name is used here
         model = YOLO(model_name)
         print("Model loaded successfully.")
     except Exception as e:
-        print(f"Error loading model: {e}")
+        print(f"Error loading model '{model_name}': {e}")
+        print("Please ensure the model name is correct (e.g., 'yolov8n-pose.pt') and ultralytics is installed.")
         return None
 
     print(f"Opening video file: {input_path}...")
@@ -169,10 +200,9 @@ def process_video(input_path, output_video_path, output_csv_path, start_frame, e
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    # Calculate the Y threshold in pixels (Y=0 is at the top)
-    y_pixel_threshold = frame_height * y_threshold_factor
+    y_pixel_threshold = frame_height * y_threshold_factor # Calculate threshold for fallback
     print(f"Video properties: {frame_width}x{frame_height} @ {fps:.2f} FPS, Total Frames: {total_frames}")
-    print(f"Filtering out persons with center Y < {y_pixel_threshold:.0f} pixels (Factor: {y_threshold_factor})") # Corrected print statement
+    print(f"Fallback Y-threshold: Persons with center Y < {y_pixel_threshold:.0f} pixels will be filtered out in fallback cases.")
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out_video = cv2.VideoWriter(output_video_path, fourcc, fps, (frame_width, frame_height))
@@ -208,43 +238,51 @@ def process_video(input_path, output_video_path, output_csv_path, start_frame, e
 
             player1_pos = {'x': '', 'y': ''}
             player2_pos = {'x': '', 'y': ''}
-            potential_players = [] # Store persons below the Y threshold line
+            all_detected_persons = [] # Store all detected persons with their coords
 
+            # Get all detected persons
             if results[0].boxes:
                 boxes = results[0].boxes.xyxy.cpu().numpy()
                 classes = results[0].boxes.cls.cpu().numpy()
-                # --- DEBUG PRINT ADDED ---
-                print(f"Frame {frame_count}: ", end="") # Start line for frame info
-                persons_y_coords = [] # Collect Y coords for printing
-                passed_filter_count = 0
-                # --- End DEBUG ---
                 for i, box in enumerate(boxes):
                     if int(classes[i]) == 0: # Is it a person?
                         xmin, ymin, xmax, ymax = box
                         center_x = (xmin + xmax) / 2
                         center_y = (ymin + ymax) / 2
-                        persons_y_coords.append(f"{center_y:.0f}") # DEBUG Collect Y coord
-                        # --- Apply CORRECTED Y-Threshold Filter ---
-                        # Keep only persons whose center Y is *below* the threshold line
-                        if center_y > y_pixel_threshold: # Check if center_y > threshold
-                            potential_players.append({'center_x': center_x, 'center_y': center_y})
-                            passed_filter_count += 1 # DEBUG Count passed
-                        # Else: Ignore this person (likely umpire or spectator above the line)
-                # --- DEBUG PRINT ADDED ---
-                print(f" Detections Ys=[{', '.join(persons_y_coords)}], Passed Filter={passed_filter_count}") # Print collected info
-                # --- End DEBUG ---
+                        all_detected_persons.append({'center_x': center_x, 'center_y': center_y})
 
-            # Identify Player 1 (left) and Player 2 (right) from the filtered list
-            if len(potential_players) >= 2:
-                potential_players.sort(key=lambda p: p['center_x']) # Sort by X
-                player1_pos['x'] = int(potential_players[0]['center_x'])
-                player1_pos['y'] = int(potential_players[0]['center_y'])
-                player2_pos['x'] = int(potential_players[-1]['center_x']) # Use last element for P2
-                player2_pos['y'] = int(potential_players[-1]['center_y'])
-            elif len(potential_players) == 1:
-                # If only one person below threshold, assume it's a player
-                player1_pos['x'] = int(potential_players[0]['center_x'])
-                player1_pos['y'] = int(potential_players[0]['center_y'])
+            # --- Player Selection Logic ---
+            selected_players = []
+            num_detected = len(all_detected_persons)
+
+            if num_detected == 3:
+                all_detected_persons.sort(key=lambda p: p['center_y']) # Sort by Y, ascending
+                selected_players = all_detected_persons[1:] # Take the lower two
+            elif num_detected == 2:
+                selected_players = all_detected_persons
+            else:
+                potential_players = []
+                for person in all_detected_persons:
+                    if person['center_y'] > y_pixel_threshold:
+                        potential_players.append(person)
+
+                if len(potential_players) >= 2:
+                    potential_players.sort(key=lambda p: p['center_y'], reverse=True)
+                    selected_players = potential_players[:2] # Take the lowest 2
+                elif len(potential_players) == 1:
+                    selected_players = potential_players # Take the single one
+
+            # Assign P1 and P2 from the selected players
+            if len(selected_players) >= 2:
+                selected_players.sort(key=lambda p: p['center_x']) # Sort the final two by X
+                player1_pos['x'] = int(selected_players[0]['center_x'])
+                player1_pos['y'] = int(selected_players[0]['center_y'])
+                player2_pos['x'] = int(selected_players[1]['center_x'])
+                player2_pos['y'] = int(selected_players[1]['center_y'])
+            elif len(selected_players) == 1:
+                # If only one player selected (e.g., after fallback)
+                player1_pos['x'] = int(selected_players[0]['center_x'])
+                player1_pos['y'] = int(selected_players[0]['center_y'])
 
             # Write ONLY identified player positions to CSV
             csv_writer.writerow([
@@ -265,7 +303,10 @@ def process_video(input_path, output_video_path, output_csv_path, start_frame, e
                  cv2.putText(annotated_frame, 'P2', (player2_pos['x']+10, player2_pos['y']), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
 
             out_video.write(annotated_frame)
-            
+
+            if processed_frame_count % 100 == 0:
+                 print(f"Processed frame {frame_count} (Total processed: {processed_frame_count})")
+
         elif frame_count >= actual_end_frame and end_frame != 0:
              print(f"Reached specified end frame: {end_frame}")
              break
@@ -289,19 +330,18 @@ def process_video(input_path, output_video_path, output_csv_path, start_frame, e
     print(f"Video processing complete. Output video saved to '{output_video_path}', positions saved to '{output_csv_path}'.")
     return frame_width, frame_height
 
-
 # --- Script Execution ---
 if __name__ == "__main__":
     print("Starting Table Tennis Analyzer...")
-    # Run video processing with the corrected Y-threshold filter
+    # Run video processing with the refined player selection logic
     dimensions = process_video(
         INPUT_VIDEO,
         OUTPUT_VIDEO,
         OUTPUT_CSV,
         START_FRAME,
         END_FRAME,
-        MODEL_NAME,
-        PLAYER_Y_THRESHOLD_FACTOR # Pass the threshold factor
+        MODEL_NAME, # Use corrected model name
+        PLAYER_Y_THRESHOLD_FACTOR # Pass the threshold factor for fallback cases
     )
 
     # If processing succeeded, generate the heatmap
