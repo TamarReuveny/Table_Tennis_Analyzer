@@ -13,17 +13,17 @@ import easyocr # Import EasyOCR
 import re # Import regex for parsing score
 
 # --- Constants for Video Processing ---
-START_FRAME = 16500 # Start frame (adjust as needed)
-END_FRAME = 18000   # End frame (adjust as needed, 0 for full video)
+START_FRAME = 15000 # Start frame (adjust as needed)
+END_FRAME = 20000   # End frame (adjust as needed, 0 for full video)
 INPUT_VIDEO = 'input.mp4'
-OUTPUT_VIDEO = 'output_with_detections_filtered.mp4'
+OUTPUT_VIDEO = 'output_with_detections.mp4'
 OUTPUT_CSV = 'player_positions.csv'
 MIN_X_SEPARATION_FACTOR = 0.10
 
 # --- Constants for Score OCR ---
 # Coordinates derived from user screenshots (Full Resolution 1920x1080)
 ROI_PLAYER1_SCORE = (445, 926, 557, 977) # Player 1 (Top)
-ROI_PLAYER2_SCORE = (444, 974, 556, 1025) # Player 2 (Bottom)
+ROI_PLAYER2_SCORE = (445, 974, 557, 1025) # Player 2 (Bottom)
 OCR_FRAME_INTERVAL = 5 # Run OCR check every 5 frames <<<--- UPDATED
 
 # --- Model Selection ---
@@ -119,56 +119,125 @@ def select_players(all_detected_persons, frame_width, min_x_separation_factor):
         player2_pos['x'],player2_pos['y'] = int(selected_players[1]['center_x']),int(selected_players[1]['center_y'])
     return player1_pos, player2_pos
 
-# --- Helper Function for Score Parsing ---
+# --- Helper Function for Score Parsing (Handles single digit as Games Won) ---
 def parse_score_text(ocr_results):
-    """Parses EasyOCR results to find table tennis score (Games Points)."""
+    """
+    Parses EasyOCR results from a 2-ROI setup.
+    Tries to find two numbers (Games Points).
+    If only one number is found, assumes it's Games Won and Points are 0.
+    Returns (games_won, current_points) or (None, None).
+    """
     full_text = " ".join([res[1] for res in ocr_results]).strip()
-    if full_text: print(f"    Attempting to parse OCR text: '{full_text}'") # Debug print
+    if full_text:
+        print(f"    Attempting to parse OCR text: '{full_text}'") # Debug print
+
+    # 1. Try to find two numbers first
     match = re.search(r'(\d+)\D*(\d+)', full_text)
     if match:
-        try: return int(match.group(1)), int(match.group(2))
-        except (ValueError, IndexError): pass
-    numbers = re.findall(r'\d+', full_text)
-    if len(numbers) >= 2:
-         try: return int(numbers[0]), int(numbers[1])
-         except ValueError: pass
-    return None, None
+        try:
+            games = int(match.group(1))
+            points = int(match.group(2))
+            # print(f"      Found two numbers: ({games}, {points})") # Optional Debug
+            return games, points
+        except (ValueError, IndexError):
+            pass # Failed conversion, proceed to check for single digit
 
-# --- Function to Create Score Chart (with Improved Sampling Logic) ---
+    # 2. If two numbers not found, check for exactly one number
+    numbers = re.findall(r'\d+', full_text)
+    if len(numbers) == 1:
+        try:
+            single_digit = int(numbers[0])
+            # Assume single digit is Games Won, Points are 0
+            # print(f"      Found one number: {single_digit}, assuming Games Won.") # Optional Debug
+            return single_digit, 0
+        except ValueError:
+            pass # Failed conversion
+
+    # 3. If neither two nor exactly one number found
+    # print(f"      Could not parse score from '{full_text}'") # Optional Debug
+    return None, None
+# --- Function to Create Score Chart (with Outlier Filtering and Improved Sampling Logic) ---
 def create_score_chart(csv_path, output_chart_path, sample_rate=CHART_FRAME_SAMPLE_RATE, plot_all_threshold=CHART_PLOT_ALL_THRESHOLD):
-    """Creates a line chart of calculated scores over time from the CSV."""
-    print(f"\n--- Score Chart Generation ---"); print(f"CSV: {csv_path}, Output: {output_chart_path}, SampleRate: {sample_rate}")
-    print(f"CSV: {csv_path}, Output: {output_chart_path}, SampleRate: {sample_rate}")
-    # ---> ADD THIS LINE <---
-    print(f"  DEBUG: Chart using sample_rate = {sample_rate}, plot_all_threshold = {plot_all_threshold}")
-    # ---> END OF ADDED LINE <---
+    """Creates a line chart of calculated scores over time from the CSV, filtering out single-frame outliers."""
+    print(f"\n--- Score Chart Generation ---")
+    print(f"CSV: {csv_path}, Output: {output_chart_path}, SampleRate: {sample_rate}, PlotAllThreshold: {plot_all_threshold}")
     try:
+        # --- Read and Initial Clean ---
         if not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0: print(f"Error: CSV file '{csv_path}' not found or is empty."); return
         df = pd.read_csv(csv_path);
         if df.empty: print(f"Error: CSV file '{csv_path}' contains no data rows."); return
         score_cols = ['p1_calc_score', 'p2_calc_score', 'frame']
         if not all(col in df.columns for col in score_cols): print(f"Error: Required score columns {score_cols} missing in '{csv_path}'."); return
-        df['p1_calc_score'] = pd.to_numeric(df['p1_calc_score'], errors='coerce'); df['p2_calc_score'] = pd.to_numeric(df['p2_calc_score'], errors='coerce')
+
+        df['p1_calc_score'] = pd.to_numeric(df['p1_calc_score'], errors='coerce')
+        df['p2_calc_score'] = pd.to_numeric(df['p2_calc_score'], errors='coerce')
+        # Keep only rows where BOTH scores are valid numbers for comparison
         df_scores = df.dropna(subset=['p1_calc_score', 'p2_calc_score']).copy()
         if df_scores.empty: print("Error: No valid score data found in CSV after cleaning. Cannot generate chart."); return
-        num_valid_scores = len(df_scores); plot_label_suffix = ""; df_sampled = pd.DataFrame()
-        if num_valid_scores == 0: print("Error: Zero valid scores after cleaning."); return
+        print(f"Initial valid score rows found: {len(df_scores)}")
+
+        # --- <<< NEW: Outlier Filtering Logic >>> ---
+        # Calculate previous and next score values using shift
+        df_scores['p1_prev'] = df_scores['p1_calc_score'].shift(1)
+        df_scores['p1_next'] = df_scores['p1_calc_score'].shift(-1)
+        df_scores['p2_prev'] = df_scores['p2_calc_score'].shift(1)
+        df_scores['p2_next'] = df_scores['p2_calc_score'].shift(-1)
+
+        # Identify outliers for Player 1: Previous and next are the same, but current is different
+        p1_outlier_condition = (
+            (df_scores['p1_prev'] == df_scores['p1_next']) &
+            (df_scores['p1_calc_score'] != df_scores['p1_prev']) # or != p1_next
+        )
+        # Identify outliers for Player 2: Previous and next are the same, but current is different
+        p2_outlier_condition = (
+            (df_scores['p2_prev'] == df_scores['p2_next']) &
+            (df_scores['p2_calc_score'] != df_scores['p2_prev']) # or != p2_next
+        )
+
+        # Combine conditions: a row is an outlier if EITHER player's score is an outlier in that row
+        is_outlier = p1_outlier_condition | p2_outlier_condition
+
+        # Keep only the rows that are NOT outliers
+        df_filtered = df_scores[~is_outlier].copy() # Use ~ for negation
+        num_removed = len(df_scores) - len(df_filtered)
+        if num_removed > 0:
+            print(f"Removed {num_removed} single-frame outlier score reading(s).")
+        else:
+            print("No single-frame outliers detected for removal.")
+        # --- <<< End of Outlier Filtering Logic >>> ---
+
+        # --- Sampling and Plotting (using df_filtered) ---
+        num_valid_scores = len(df_filtered); plot_label_suffix = ""; df_sampled = pd.DataFrame()
+        if num_valid_scores == 0: print("Error: Zero valid scores remaining after filtering."); return
         elif num_valid_scores < plot_all_threshold:
-            print(f"Found {num_valid_scores} valid score points (<{plot_all_threshold}). Plotting all points."); df_sampled = df_scores; plot_label_suffix = " (All Points)"
+            print(f"Found {num_valid_scores} valid score points after filtering (<{plot_all_threshold}). Plotting all points.")
+            df_sampled = df_filtered # Plot all filtered points
+            plot_label_suffix = " (All Filtered Points)"
         else:
             if sample_rate <= 0: sample_rate = 1
-            df_sampled = df_scores.iloc[::sample_rate, :]
-            if len(df_sampled) < 2 and num_valid_scores >= 2 : print(f"Warning: Only {len(df_sampled)} points remain after sample rate {sample_rate}. Plotting first/last points."); df_sampled = df_scores.iloc[[0, -1]]; plot_label_suffix = " (First/Last Points)"
-            elif not df_sampled.empty: plot_label_suffix = f" (Sampled approx. every {sample_rate} valid reads)"
-        if df_sampled.empty: print("Error: No data points selected for plotting. Skipping chart."); return
+            # Sample from the filtered data
+            df_sampled = df_filtered.iloc[::sample_rate, :]
+            # Ensure at least first/last points if sampling drastically reduces points
+            if len(df_sampled) < 2 and num_valid_scores >= 2 :
+                 print(f"Warning: Only {len(df_sampled)} points remain after sample rate {sample_rate} on filtered data. Plotting first/last filtered points.")
+                 # Ensure we take from the filtered dataframe
+                 df_sampled = df_filtered.iloc[[0, -1]]
+                 plot_label_suffix = " (First/Last Filtered Points)"
+            elif not df_sampled.empty:
+                plot_label_suffix = f" (Sampled approx. every {sample_rate} valid filtered reads)"
+
+        if df_sampled.empty: print("Error: No data points selected for plotting after filtering/sampling. Skipping chart."); return
         print(f"Plotting {len(df_sampled)} data points for score chart.")
+
         plt.figure(figsize=(15, 7))
+        # Plot using the original score columns from the sampled data
         plt.plot(df_sampled['frame'], df_sampled['p1_calc_score'], label='Player 1 Score', marker='.', linestyle='-', markersize=4)
         plt.plot(df_sampled['frame'], df_sampled['p2_calc_score'], label='Player 2 Score', marker='.', linestyle='-', markersize=4)
-        plt.xlabel(f"Frame Number{plot_label_suffix}"); plt.ylabel("Calculated Score (Games*10 + Points)"); plt.title("Calculated Table Tennis Score Over Time")
+        plt.xlabel(f"Frame Number{plot_label_suffix}"); plt.ylabel("Calculated Score (Games*10 + Points)"); plt.title("Calculated Table Tennis Score Over Time (Outliers Filtered)")
         plt.legend(); plt.grid(True); plt.tight_layout(); plt.savefig(output_chart_path, dpi=150); print(f"Score chart saved successfully to '{output_chart_path}'"); plt.close()
-    except Exception as e: print(f"Error generating score chart: {e}")
 
+    except Exception as e:
+        print(f"Error generating score chart: {e}")
 
 # --- Main Processing Function ---
 def process_video(input_path, output_video_path, output_csv_path, start_frame, end_frame, model_name, min_x_separation_factor, ocr_reader, p1_roi, p2_roi, ocr_interval=OCR_FRAME_INTERVAL):
@@ -250,7 +319,7 @@ def process_video(input_path, output_video_path, output_csv_path, start_frame, e
                 #     except Exception as e_write: print(f"  Warning: Could not write debug ROI: {e_write}")
                 # --- End Debug ROI Save ---
 
-                processed_roi1,processed_roi2=None,None; thresh_val=160; threshold_type=cv2.THRESH_BINARY # Preprocessing setup
+                processed_roi1,processed_roi2=None,None; thresh_val=200; threshold_type=cv2.THRESH_BINARY # Preprocessing setup
 
                 if y2_p1 > y1_p1 and x2_p1 > x1_p1: roi1_img=frame[y1_p1:y2_p1,x1_p1:x2_p1]; gray1=cv2.cvtColor(roi1_img,cv2.COLOR_BGR2GRAY); ret1,processed_roi1=cv2.threshold(gray1,thresh_val,255,threshold_type)
                 if y2_p2 > y1_p2 and x2_p2 > x1_p2: roi2_img=frame[y1_p2:y2_p2,x1_p2:x2_p2]; gray2=cv2.cvtColor(roi2_img,cv2.COLOR_BGR2GRAY); ret2,processed_roi2=cv2.threshold(gray2,thresh_val,255,threshold_type)
