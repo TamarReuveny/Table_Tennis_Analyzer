@@ -8,3 +8,41 @@ venv/
 __pycache__/
 *.pyc
 
+# Virtual Environment
+venv/
+venv_official/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# OS generated files
+.DS_Store
+
+# IDE / Editor specific (optional)
+.vscode/
+.idea/
+
+# Generated output files
+*_analyzed.mp4
+*_data.csv
+streamlit_heatmap.png
+streamlit_score_chart.png
+
+# Downloaded Models
+*.pt
+
+# Temporary files
+*.tmp
+
+# Log files (if any)
+*.log
+
+# Ignore virtual environments
+.venv/
+venv/
+env/
+*/.venv/
+*/venv/
+*/env/
+
