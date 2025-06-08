@@ -13,12 +13,12 @@ This captivating project allows users to effortlessly upload a match video and i
 
 ## 🚀 Features
 
-- 🔍 **YOLO Pose Model Integration** — accurate detection of players in each frame.
-- 📐 **Smart Player Selection Logic** — filters and identifies two main players using spatial analysis.
-- 🧠 **Score Parsing** — uses OCR with preprocessing and error handling to extract scores reliably.
-- 🌈 **Heatmap Generation** — visualizes movement density beautifully.
-- 📉 **Score Charts** — elegant visualization of score progression over time.
-- 📁 **Downloadable Outputs** — video, heatmap, score chart, and CSV data, all exportable.
+- **YOLO Pose Model Integration** — accurate detection of players in each frame.
+- **Smart Player Selection Logic** — filters and identifies two main players using spatial analysis.
+- **Score Parsing** — uses OCR with preprocessing and error handling to extract scores reliably.
+- **Heatmap Generation** — visualizes movement density beautifully.
+- **Score Charts** — elegant visualization of score progression over time.
+- **Downloadable Outputs** — video, heatmap, score chart, and CSV data, all exportable.
 
 ---
 
