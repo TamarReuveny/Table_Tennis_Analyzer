@@ -28,7 +28,7 @@ This captivating project allows users to effortlessly upload a match video and i
 1. Clone the repository:
    
 ```bash
-git clone https://github.com/your-username/TableTennisAnalyzer.git
+git clone https://github.com/TamarReuveny/Table_Tennis_Analyzer
 cd TableTennisAnalyzer
 ```
 2. Install dependencies:
